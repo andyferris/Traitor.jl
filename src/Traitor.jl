@@ -1,5 +1,49 @@
 module Traitor
 
+import Base: @pure
+
+export @traitor
+
+# Uniquely reorder a Tuple type based on uid
+@pure function order_types{Types <: Tuple}(::Type{Types})
+    uids = map(t -> getfield(getfield(t,:name),:uid), Types.parameters)
+    inds = sortperm(uids)
+    Tuple{Types.parameters[inds]...}
+end
+
+# Return the trait class of a type or union.
+@pure function traitclass(t)
+    if typeof(t) === Union
+        class = unique(map(supertype, t.types))
+        if length(class) != 1
+            error("unions of traits must belong to the same trait class")
+        end
+        return class[1]
+    else
+        return supertype(t)
+    end
+end
+
+# Return a Tuple of trait classes reordered to the canonical ordering
+@pure function traitclasses(t)
+    Tuple{traitclass(t)}
+end
+@pure function traitclasses{T<:Tuple}(t::Type{T})
+    classes = order_types(Tuple{map(traitclass, t.parameters)...})
+    if length(unique(classes.parameters)) != length(classes.parameters)
+        error("Repeated trait classes in $t")
+    end
+    classes
+end
+
+@pure ensure_Tuple(t) = Tuple{t}
+@pure ensure_Tuple{T<:Tuple}(t::Type{T}) = t
+
+@generated function construct_tuple{T<:Tuple}(::Type{T}, val)
+    Expr(:tuple, [:($p(val)) for p in T.parameters]...)
+end
+
+
 # Extract `(normal_argument, trait)` from a function argument expression.
 # `normal_argument` is the standard argument expr without the trait.  If no
 # trait is present in the expression, return `nothing` for `trait`.
@@ -27,6 +71,30 @@ function extract_arg_trait(ex)
     return normalarg, traittype
 end
 
+#=
+# :(x::T, y::S::B) ->
+# ([:(x::T), :(y::S)],  [:(Tuple{}), :(Tuple{B})]
+function split_traitfun_args(funcargs)
+    args = Any[]
+    traitargs = Any[]
+    if isempty(funcargs)
+        return traitargs, args
+    end
+    argstart = 1
+    if isa(funcargs[1], Expr) && funcargs[1].head == :parameters
+        # keyword arguments
+        push!(args, funcargs[1])
+        argstart += 1
+    end
+    for i = argstart:length(funcargs)
+        arg, trait = extract_arg_trait(funcargs[i])
+        push!(args, arg)
+        push!(traitargs, trait !== nothing ? trait : )
+    end
+    args
+end
+=#
+
 macro traitor(ex)
     if ex.head != :function
         error("trait expression must be a function")
@@ -40,11 +108,15 @@ macro traitor(ex)
     trait = trait !== nothing ? trait : :(Tuple{})
     #newargs = split_traitfun_args(def.args[2:end])
     internalname = Symbol("_traitor_"*string(funcname))
-    esc(Expr(:block,
-        Expr(:function, Expr(:call, funcname, arg),
-             Expr(:block, Expr(:call, internalname, :(super($trait)($argname)), argname))),
-        Expr(:function, Expr(:call, internalname, Expr(:(::),trait), arg), body)
-    ))
+    esc(quote
+        function $funcname($arg)
+            $internalname(Traitor.construct_tuple(Traitor.traitclasses($trait),$argname), $argname)
+        end
+        function $internalname(::Traitor.ensure_Tuple($trait), $arg)
+            $(body.args...)
+        end
+    end)
 end
 
 end # module
+
