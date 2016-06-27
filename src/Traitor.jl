@@ -27,7 +27,6 @@ function extract_arg_trait(ex)
     return normalarg, traittype
 end
 
-#=
 macro traitor(ex)
     if ex.head != :function
         error("trait expression must be a function")
@@ -35,7 +34,17 @@ macro traitor(ex)
     def = ex.args[1]
     body = ex.args[2]
     @assert def.head == :call
+    funcname = def.args[1]
+    arg, trait = extract_arg_trait(def.args[2])
+    argname = isa(arg, Symbol) ? arg : arg.args[1]
+    trait = trait !== nothing ? trait : :(Tuple{})
+    #newargs = split_traitfun_args(def.args[2:end])
+    internalname = Symbol("_traitor_"*string(funcname))
+    esc(Expr(:block,
+        Expr(:function, Expr(:call, funcname, arg),
+             Expr(:block, Expr(:call, internalname, :(super($trait)($argname)), argname))),
+        Expr(:function, Expr(:call, internalname, Expr(:(::),trait), arg), body)
+    ))
 end
-=#
 
 end # module
