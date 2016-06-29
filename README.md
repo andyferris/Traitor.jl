@@ -9,16 +9,16 @@ bestows traits on (or *betrays*) a programming language.
 
 ## Overview
 
-The *Traitor.jl* is a naive, and potentially evil, attempt to create a
+The *Traitor.jl* is a naive (and potentially evil) attempt to create a
 convenient framework for trait-based dispatch in the Julia programming language.
-Traits provide an alternative to single-inheritance, multiple-dispatch (SIMD?),
+Traits provide an alternative to *single-inheritance multiple-dispatch*,
 which would allow for complex combinations of object properties to be tested
 at method dispatch.
 
 Currently it is definitely a work in progress, but it supports the features
 discussed in the following sections.
 
-**Finaly warning: if you use this package, it might not actually work yet**.
+**Final warning: if you use this package, it might not actually work yet!**.
 
 ### Our expectations of a traits type system
 
@@ -121,34 +121,39 @@ same trait class*. For example:
 
 This is where our design decision to make traits defined by instances are
 important - it allows us to leverage the existing dispatch on `::Union{}` signatures
-which is more convenient than `::Type{Union{...}}` signatures.
+which is more convenient than `::Type{Union{...}}` signatures. (PS - this will
+probably switch back with our new generate function approach.)
 
 ### Intersection of traits
 
 Unfortunately, this is where our traitorous mutiny against single inheritance
 currently falls down into a pile of sticks. Although somewhat useful as-is, it
 is clear that interesting intersections of traits is what we are looking for.
-If you made it this far, and have an ideas, please discuss or contribute!
+If you made it this far, and have any ideas, please discuss or contribute!
 
 The simplest approach could be to make trait-based functions static in which traits
 they know. There could be a pre-defintion along the lines of
 
 ```julia
-@trait function f::((Size, Odor), (), (Size))
+@trait function f::((Size, Odor), (), (Size,))
 ```
 where the right defines which traits apply to which arguments (the first allows
-both `Size` and `Odor`, while the second is traitless™).
+both `Size` and `Odor`, while the second is traitless™, and the third dispatches
+on `Size` only).
 
-What we really need is a convenient way to implement intersection. A good place
-to understand this is to build an `Intersection{}` type that is an unholy
-combination of `typeintersect()` and `Union{}`. On traits, dispatch on products
-of traits is achieved by "thunking" out both trait arguments, like
-```julia
-f(a::::Intersection{Big, Smelly}) = _f(Big(), Smelly())
-```
-So we may apply some thought there.
-
-The most full approach would intercept dispatch (with a generated function) and
+The most complete approach would intercept dispatch (with a generated function) and
 store it's own method table (including trait annotation) and do our own dispatch
-algorithm. Unfortunately, these won't interact with generic functions, but this
-*might* prototype where to go in Base Julia.
+algorithm. There is WIP in *TraitorFunction.jl* to do this, by first allowing
+multiple-dispatch to run first, and then using our own method lookup. In fact,
+this kind of composed-dispatch algorithm seems very inviting - we don't involve
+multiple-inheritance in the standard Julia approach, and conversely the trait
+dispatch (allowing multiple-inheritance) is easy since the traits themselves are
+quite simple.
+
+Unfortunately, we haven't figured out a way to make these interact
+with generic functions, but it *might* provide a playground where you can define
+new "traitor" functions in order to prototype where to go in Base Julia.
+
+## Acknowledgements
+
+This is joint work by Chris Foster (**@c42f**) and Andy Ferris (**@andyferris**).
