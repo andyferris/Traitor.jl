@@ -1,4 +1,4 @@
-using Traitor
+#=using Traitor
 using Traitor: extract_arg_trait
 using BaseTestNext
 
@@ -69,4 +69,4 @@ end
 @test f(BigInt(1)) == "Huge"
 #@test f(Int16(1)) == "A small FooB"
 
-end
+end=#
