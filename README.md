@@ -145,6 +145,15 @@ end
 end # module
 ```
 
+### Help wanted: the `@betray` macro
+
+We would like to have a macro, say `@betray`, that would be able to "steal"
+pre-existing method definitions and make them compatible with `@traitor` methods
+as a default fallback. The current roadblock is that we don't know how to
+take the code corresponding to a `Method` (or `LambdaInfo`) and insert it into
+a new method definition (since the `LambdaInfo` is lowered IR and it is normal
+to define methods with top-level expression syntax).
+
 ## Acknowledgements
 
 This is joint work by Chris Foster (**@c42f**) and Andy Ferris (**@andyferris**).
