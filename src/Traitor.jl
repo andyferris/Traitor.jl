@@ -252,10 +252,6 @@ macro traitor(ex)
     # It's hard to get all of this right with nest quote blocks, AND it's hard
     # to get this right with Expr() objects... grrr...
     esc(Expr(:block,
-        Expr(:function, Expr(:call, internalname, args...), body),
-        :( d = Traitor.get_trait_table($funcname, $(Expr(:curly, :Tuple, argtypes...))) ),
-        :( d[$(Expr(:curly, :Tuple, traits...))] = $internalname ),
-
         Expr(:stagedfunction, Expr(:call, funcname, args...), Expr(:block,
             :( dict = Traitor.get_trait_table($funcname, $(Expr(:curly, :Tuple, argtypes...))) ),
             :( f = Traitor.trait_dispatch(dict, $(Expr(:curly, :Tuple, argnames...))) ),
@@ -263,7 +259,10 @@ macro traitor(ex)
                 Expr(:meta, :inline),
                 Expr(:call, Expr(:$, :f), argnames...)
             ))
-        ))
+        )),
+        Expr(:function, Expr(:call, internalname, args...), body),
+        :( d = Traitor.get_trait_table($funcname, $(Expr(:curly, :Tuple, argtypes...))) ),
+        :( d[$(Expr(:curly, :Tuple, traits...))] = $internalname ),
     ))
 end
 
