@@ -114,11 +114,19 @@ end
 
 
 """
-Extract `(normal_argument, trait)` from a function argument expression.
-`normal_argument` is the standard argument expr without the trait.  If no
-trait is present in the expression, return `nothing` for `trait`.
+    extract_arg_trait(ex) -> (normal_argument, trait)
 
-:(x::Int::Big) -> (:(x::Int), :Big)
+Parse an argument signature to extract both the "normal"
+typed-variable declaration and the trait expression.
+
+If no trait is present in the expression, return `Tuple{}` for
+`trait`.
+
+# Examples
+
+```julia
+extract_arg_trait(:(x::Int::Big)) -> (:(x::Int), :(Tuple{Big}))
+```
 """
 function extract_arg_trait(ex)
     if isa(ex, Symbol)
