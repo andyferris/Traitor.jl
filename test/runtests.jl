@@ -35,3 +35,16 @@ end
 @test howbig(1) == "Teensy..."
 @test howbig(Int128(1)) == "So-so"
 @test howbig(BigInt(1)) == "Huge!"
+
+@test @inferred(supertrait(Small)) == Size
+@test @inferred(supertrait(Union{Small,Medium})) == Size
+
+abstract Fooness
+
+immutable FooA <: Fooness ; end
+immutable FooB <: Fooness ; end
+
+Fooness(::Type{Any}) = FooA
+Fooness(::Type{Int16}) = FooB
+
+@test_throws ErrorException supertrait(Union{Small,FooB})

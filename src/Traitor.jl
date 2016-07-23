@@ -96,21 +96,18 @@ end
 For a simple trait type, returns `supertype(t)`, while for a `Union` of traits
 is returns their common supertype (or else throws an error).
 """
-function supertrait(t)
-    if isa(t, DataType) # A single trait is a DataType
-        return supertype(t)
-    elseif isa(t, Union)
-        traitclass = supertype(t.types[1])
-        for j = 2:length(t.types)
-            if traitclass != supertype(t.types[j])
-                error("Unions of traits must be in the same class. Got $t")
-            end
+supertrait(t::DataType) = supertype(t)
+supertrait(t::Union) = supertrait_union(t)
+Base.@pure function supertrait_union(t)
+    traitclass = supertype(t.types[1])
+    for j = 2:length(t.types)
+        if traitclass != supertype(t.types[j])
+            error("Unions of traits must be in the same class. Got $t")
         end
-        return traitclass
-    else
-        error("Unknown trait $t")
     end
+    return traitclass
 end
+supertrait(t) = error("Unknown trait $t")
 
 
 """
