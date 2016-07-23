@@ -1,32 +1,35 @@
-#=using Traitor
+using Traitor
 using Traitor: extract_arg_trait
-using BaseTestNext
+if VERSION < v"0.5.0-dev"
+    using BaseTestNext
+else
+    using Base.Test
+end
 
 @testset "Parsing of function argument trait constraints" begin
 
 # Simple trait & type symbols
-@test extract_arg_trait(:(x::T::A)) == (:(x::T), :A)
-@test extract_arg_trait(:(x::::A))  == (:(x),    :A)
-@test extract_arg_trait(:(x::T))    == (:(x::T), nothing)
-@test extract_arg_trait(:(x))       == (:x,      nothing)
+@test extract_arg_trait(:(x::T::A)) == (:(x::T),   :(Tuple{A}))
+@test extract_arg_trait(:(x::::A))  == (:(x::Any), :(Tuple{A}))
+@test extract_arg_trait(:(x::T))    == (:(x::T),     Tuple{})
+@test extract_arg_trait(:(x))       == (:(x::Any),   Tuple{})
 # Type exprs
-@test extract_arg_trait(:(x::Union{S,T}::A)) == (:(x::Union{S,T}), :A)
-@test extract_arg_trait(:(x::Union{S,T}))    == (:(x::Union{S,T}), nothing)
+@test extract_arg_trait(:(x::Union{S,T}::A)) == (:(x::Union{S,T}), :(Tuple{A}))
+@test extract_arg_trait(:(x::Union{S,T}))    == (:(x::Union{S,T}),   Tuple{})
 # Trait exprs
-@test extract_arg_trait(:(x::T::Union{A,B})) == (:(x::T), :(Union{A,B}))
-@test extract_arg_trait(:(x::::Union{A,B}))  == (:(x),    :(Union{A,B}))
+@test extract_arg_trait(:(x::T::Union{A,B})) == (:(x::T),   :(Tuple{Union{A,B}}))
+@test extract_arg_trait(:(x::::Union{A,B}))  == (:(x::Any), :(Tuple{Union{A,B}}))
 # Trait & type exprs
-@test extract_arg_trait(:(x::Union{S,T}::Union{A,B})) == (:(x::Union{S,T}), :(Union{A,B}))
-@test extract_arg_trait(:(x::::Union{A,B}))  == (:(x),    :(Union{A,B}))
-@test extract_arg_trait(:(x::Union{S,T}))    == (:(x::Union{S,T}), nothing)
+@test extract_arg_trait(:(x::Union{S,T}::Union{A,B})) == (:(x::Union{S,T}), :(Tuple{Union{A,B}}))
+@test extract_arg_trait(:(x::::Union{A,B}))  == (:(x::Any),      :(Tuple{Union{A,B}}))
+@test extract_arg_trait(:(x::Union{S,T}))    == (:(x::Union{S,T}), Tuple{})
 # Keyword args
-@test extract_arg_trait(Expr(:kw,:(x::T::A),1)) == (Expr(:kw,:(x::T),1), :A)
-@test extract_arg_trait(Expr(:kw,:(x::::A),1))  == (Expr(:kw,:x,1),      :A)
-@test extract_arg_trait(Expr(:kw,:(x::T),1))    == (Expr(:kw,:(x::T),1), nothing)
-@test extract_arg_trait(Expr(:kw,:x,1))         == (Expr(:kw,:x,1),      nothing)
+@test extract_arg_trait(Expr(:kw,:(x::T::A),1)) == (Expr(:kw,:(x::T),1),   :(Tuple{A}))
+@test extract_arg_trait(Expr(:kw,:(x::::A),1))  == (Expr(:kw,:(x::Any),1), :(Tuple{A}))
+@test extract_arg_trait(Expr(:kw,:(x::T),1))    == (Expr(:kw,:(x::T),1),     Tuple{})
+@test extract_arg_trait(Expr(:kw,:x,1))         == (Expr(:kw,:(x::Any),1),   Tuple{})
 
 end
-
 
 abstract Fooness
 
@@ -69,4 +72,4 @@ end
 @test f(BigInt(1)) == "Huge"
 #@test f(Int16(1)) == "A small FooB"
 
-end=#
+end
