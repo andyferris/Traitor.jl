@@ -96,29 +96,34 @@ end
 For a simple trait type, returns `supertype(t)`, while for a `Union` of traits
 is returns their common supertype (or else throws an error).
 """
-function supertrait(t)
-    if isa(t, DataType) # A single trait is a DataType
-        return supertype(t)
-    elseif isa(t, Union)
-        traitclass = supertype(t.types[1])
-        for j = 2:length(t.types)
-            if traitclass != supertype(t.types[j])
-                error("Unions of traits must be in the same class. Got $t")
-            end
+supertrait(t::DataType) = supertype(t)
+supertrait(t::Union) = supertrait_union(t)
+Base.@pure function supertrait_union(t)
+    traitclass = supertype(t.types[1])
+    for j = 2:length(t.types)
+        if traitclass != supertype(t.types[j])
+            error("Unions of traits must be in the same class. Got $t")
         end
-        return traitclass
-    else
-        error("Unknown trait $t")
     end
+    return traitclass
 end
+supertrait(t) = error("Unknown trait $t")
 
 
 """
-Extract `(normal_argument, trait)` from a function argument expression.
-`normal_argument` is the standard argument expr without the trait.  If no
-trait is present in the expression, return `nothing` for `trait`.
+    extract_arg_trait(ex) -> (normal_argument, trait)
 
-:(x::Int::Big) -> (:(x::Int), :Big)
+Parse an argument signature to extract both the "normal"
+typed-variable declaration and the trait expression.
+
+If no trait is present in the expression, return `Tuple{}` for
+`trait`.
+
+# Examples
+
+```julia
+extract_arg_trait(:(x::Int::Big)) -> (:(x::Int), :(Tuple{Big}))
+```
 """
 function extract_arg_trait(ex)
     if isa(ex, Symbol)
@@ -244,10 +249,6 @@ macro traitor(ex)
     # It's hard to get all of this right with nest quote blocks, AND it's hard
     # to get this right with Expr() objects... grrr...
     esc(Expr(:block,
-        Expr(:function, Expr(:call, internalname, args...), body),
-        :( d = Traitor.get_trait_table($funcname, $(Expr(:curly, :Tuple, argtypes...))) ),
-        :( d[$(Expr(:curly, :Tuple, traits...))] = $internalname ),
-
         Expr(:stagedfunction, Expr(:call, funcname, args...), Expr(:block,
             :( dict = Traitor.get_trait_table($funcname, $(Expr(:curly, :Tuple, argtypes...))) ),
             :( f = Traitor.trait_dispatch(dict, $(Expr(:curly, :Tuple, argnames...))) ),
@@ -255,7 +256,10 @@ macro traitor(ex)
                 Expr(:meta, :inline),
                 Expr(:call, Expr(:$, :f), argnames...)
             ))
-        ))
+        )),
+        Expr(:function, Expr(:call, internalname, args...), body),
+        :( d = Traitor.get_trait_table($funcname, $(Expr(:curly, :Tuple, argtypes...))) ),
+        :( d[$(Expr(:curly, :Tuple, traits...))] = $internalname ),
     ))
 end
 
