@@ -54,41 +54,57 @@ previous definition.
 """
 module Traitor
 
-import Base: @pure
-export @traitor, @betray, supertrait
+using Base: @pure, uncompressed_ast, unwrap_unionall, tuple_type_cons
+using Core: SimpleVector, svec, CodeInfo
 
+export @traitor, supertrait, betray!
+
+
+struct FallbackTrait end
+FallbackTrait(::Type) = FallbackTrait
+supertrait(::Type{FallbackTrait}) = FallbackTrait
 
 """
-    @betray f
+    betray!(f, ::Type{TT}) where {TT <: Tuple}
 
-The goal of the `@betray` macro is to take over the methods of `f` and ready
-them to be compatible with traits-based dispatch, so that new submethods
-defined by `@traitor` do not overwrite existing default methods (and used where
-no more specific trait match is found).
+Et tu?
 
-WARNING: Please note this macro has NOT been implemented yet! (If anyone knows
-how to turn a `Method` object into a new method definition, please let us know).
+Take over the methods of `f` and readythem to be compatible with traits-based dispatch, 
+so that new submethods defined by `@traitor` do not overwrite existing default methods 
+(and used where no more specific trait match is found).
 
-(See also `Traitor` and `@traitor`.)
+Betraying functions is not a very kind thing to do, and can cause unintended side effects.
 """
-macro betray(ex)
-    if !isa(ex, Symbol)
-        error("Use @betray functionname")
+function betray!(f, ::Type{TT}) where {TT<:Tuple}
+    whereparams = TT isa UnionAll ? typevars(TT.body) : tuple()
+    if !isempty(whereparams)
+        throw("Where parameters not currently supported")
     end
+    # TODO: make this work with TT of the form (Tuple{T, T} where T)
+    
+    m = (last ∘ collect ∘ methods)(f, TT)
+    mod = (m.module)
+    sig = tuple_type_cons(typeof(f), TT) 
+    @assert m.sig == sig "the provided signature does not exactly match a method. Given $sig, expected $(m.sig) "
+    ci = (last ∘ code_lowered)(f, TT)
+    _fname = gensym(Symbol(f))
+    
+    N = length((TT).parameters)
+    argnames = [gensym(Symbol(:arg, i)) for i ∈ 1:N]
+    argstyped = map(1:N) do i
+        T = unwrap_unionall(TT).parameters[i]
+        :($(argnames[i]) :: $T :: $FallbackTrait)
+    end
+    fsym = Symbol(f)
 
-    return quote
-        if !isdefined(ex)
-            eval(:(function $ex end))
-        else
-            # TODO
-            warn("""The @betray macro isn't currently implemented. The idea is to
-                    take the methods of a generic function and put them into a
-                    trait-dispatch table, so the user may then specialize these
-                    methods further with traits while not losing all the
-                    pre-existing definitions.""")
+    @eval mod begin
+        @generated function $_fname($(argnames...))
+            return $ci
         end
+        $Traitor.@traitor $fsym($(argstyped...)) = $_fname($(argnames...))
     end
 end
+
 
 """
     supertrait(trait)
@@ -96,14 +112,15 @@ end
 For a simple trait type, returns `supertype(t)`, while for a `Union` of traits
 is returns their common supertype (or else throws an error).
 """
-supertrait(t::DataType) = supertype(t)
-supertrait(t::Union) = supertrait_union(t)
-Base.@pure function supertrait_union(t)
-    traitclass = supertype(t.types[1])
-    for j = 2:length(t.types)
-        if traitclass != supertype(t.types[j])
-            error("Unions of traits must be in the same class. Got $t")
+@generated function supertrait(::Type{T}) where {T}
+    !(T isa Union) && return supertype(T)
+    traitclass = supertype(T.a)
+    while true
+        Tb = T.b
+        if traitclass != supertype(Tb)
+            error("Unions of traits must be in the same class. Got $T")
         end
+        (Tb isa Union) || break
     end
     return traitclass
 end
@@ -170,10 +187,10 @@ number of trait-based submethods. This generated function returns (and creates,
 if necessary, the first time it is called) the table joining the traits to
 the submethods
 """
-@generated function get_trait_table{Signature<:Tuple}(f::Function, ::Type{Signature})
+@generated function get_trait_table(f::Function, ::Type{Signature}) where {Signature <: Tuple}
     d = Dict{Any, Function}()
     return quote
-        #$(Expr(:meta,:inline))
+        $(Expr(:meta, :inline))
         ($d)
     end
 end
@@ -232,8 +249,8 @@ macro traitor(ex)
         push!(traits, trait)
     end
 
-    argnames = (argnames...) # I'm conused why $((argnames...)) doesn't work in the quote below
-    quotednames = (quotednames...)
+    argnames = (argnames...,) # I'm conused why $((argnames...)) doesn't work in the quote below
+    quotednames = (quotednames...,)
 
     # Make a new name for this specialized function
     internalname = "_"*string(funcname)*"{"
@@ -248,19 +265,32 @@ macro traitor(ex)
 
     # It's hard to get all of this right with nest quote blocks, AND it's hard
     # to get this right with Expr() objects... grrr...
-    esc(Expr(:block,
-        Expr(:stagedfunction, Expr(:call, funcname, args...), Expr(:block,
-            :( dict = Traitor.get_trait_table($funcname, $(Expr(:curly, :Tuple, argtypes...))) ),
-            :( f = Traitor.trait_dispatch(dict, $(Expr(:curly, :Tuple, argnames...))) ),
-            Expr(:quote, Expr(:block,
-                Expr(:meta, :inline),
-                Expr(:call, Expr(:$, :f), argnames...)
-            ))
-        )),
-        Expr(:function, Expr(:call, internalname, args...), body),
-        :( d = Traitor.get_trait_table($funcname, $(Expr(:curly, :Tuple, argtypes...))) ),
-        :( d[$(Expr(:curly, :Tuple, traits...))] = $internalname ),
-    ))
+
+    # esc(Expr(:block,
+    #     Expr(:stagedfunction, Expr(:call, funcname, args...), Expr(:block,
+    #         :( dict = Traitor.get_trait_table($funcname, $(Expr(:curly, :Tuple, argtypes...))) ),
+    #         :( f = Traitor.trait_dispatch(dict, $(Expr(:curly, :Tuple, argnames...))) ),
+    #         Expr(:quote, Expr(:block,
+    #             Expr(:meta, :inline),
+    #             Expr(:call, Expr(:$, :f), argnames...)
+    #         ))
+    #     )),
+    #     Expr(:function, Expr(:call, internalname, args...), body),
+    #     :( d = Traitor.get_trait_table($funcname, $(Expr(:curly, :Tuple, argtypes...))) ),
+    #     :( d[$(Expr(:curly, :Tuple, traits...))] = $internalname ),
+    # ))
+    dispatchname = gensym(Symbol(funcname, :_dispatched))
+    ex = quote
+        $Traitor.@generated function $funcname($(args...)) 
+            dict = Traitor.get_trait_table($funcname, $(Expr(:curly, :Tuple, argtypes...)))
+            $dispatchname = Traitor.trait_dispatch(dict, $(Expr(:curly, :Tuple, argnames...)))
+            (Expr(:call, $dispatchname, $(QuoteNode.(argnames)...)))
+        end
+        $internalname($(args...)) = $body
+        local d = $Traitor.get_trait_table($funcname, $(Expr(:curly, :Tuple, argtypes...))) 
+        d[Tuple{$(traits...)}] = $internalname
+    end
+    esc(ex)
 end
 
 
@@ -271,9 +301,8 @@ this generated function is specialized on the (standard) signature of the
 inputs, so the only task remaining is to find the most specific matching
 "trait signature".
 """
-function trait_dispatch{Sig <: Tuple}(trait_dictionary::Dict{Any, Function}, ::Type{Sig})
+function trait_dispatch(trait_dictionary::Dict{Any, Function}, ::Type{Sig}) where {Sig <: Tuple}
     n_args = length(Sig.parameters)
-
     # First check which (if any) of our trait conditions is satisfied by Sig
     matching_traits = Vector{Any}()
     for traits ∈ keys(trait_dictionary)
@@ -311,7 +340,6 @@ function trait_dispatch{Sig <: Tuple}(trait_dictionary::Dict{Any, Function}, ::T
                 if i == j
                     continue
                 end
-
                 if is_more_specific_traitsig(matching_traits[j], matching_traits[i])
                     most_specific = false
                     break
@@ -327,7 +355,6 @@ end
 
 function is_more_specific_traitsig(traits, traits2)
     n = length(traits.parameters)
-
     more_specific = true
     for i = 1:n
         more_specific = more_specific & is_more_specific_traitarg(traits.parameters[i], traits2.parameters[i])
@@ -360,16 +387,15 @@ function is_more_specific_traitarg(traits, traits2)
 
     # For each trait, calculate what is going on
     more_specific = true
-
     for traitclass in union(keys(d), keys(d2))
         if haskey(d, traitclass)
-            if haskey(d2, traitclass)
+            if haskey(d2, traitclass) && traitclass != FallbackTrait
                 if !(d[traitclass] <: d2[traitclass])
                     more_specific = false
                     break
                 end
             end
-        elseif haskey(d2, traitclass)
+        elseif haskey(d2, traitclass) && traitclass != FallbackTrait
             # only in old trait
             more_specific = false
             break
@@ -378,5 +404,7 @@ function is_more_specific_traitarg(traits, traits2)
 
     return more_specific
 end
+
+include("betray.jl")
 
 end # module

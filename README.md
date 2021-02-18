@@ -29,11 +29,11 @@ trait class, while subtypes of them define examples of that trait.
 For example:
 
 ```julia
-abstract Size
+abstract type Size end
 
-immutable Big <: Size; end
-immutable Medium <: Size; end
-immutable Small <: Size; end
+struct Big    <: Size end
+struct Medium <: Size end
+struct Small  <: Size end
 ```
 
 Types are annotated with traits *post-hoc* by returning the appropriate trait
@@ -43,8 +43,8 @@ question. So we could have:
 ```julia
 # Note: both input and output are types
 Size(::Union{Type{Int32},Type{Int64}}) = Small
-Size(::Type{BigInt}) = Big
-Size(::Type{Int128}) = Medium
+Size(::Type{BigInt})                   = Big
+Size(::Type{Int128})                   = Medium
 ```
 
 ### The `@traitor` macro
@@ -69,13 +69,30 @@ end
     "So-so"
 end
 
-# One can combine standard dispatch and traits-based dispatch. In this case,
-# standard multiple-dispatch occurs first, and `Traitor` then selects the most
-# appropriate trait-based submethod.
+# One can combine standard dispatch and traits-based dispatch. 
 @traitor function howbig(x::Integer::Small)
     "Teensy..."
 end
 ```
+Since standard dispatch happens before trait dispatch, the above method `howbig(x::Integer::Small)` has higher precendence than `howbig(x::::Medium)` and `howbig(x::Any::Big)`, so we need to define more specific versions of those methods:
+```julia
+@traitor howbig(x::Integer::Big) = "Huge!"
+@traitor howbig(x::Integer::Medium) = "So-so"
+```
+Now,
+```julia
+julia> howbig(1)
+"Teensy..."
+
+julia> howbig(Int128(1))
+"So-so"
+
+julia> howbig(BigInt(1))
+"Huge!"
+
+```
+
+
 
 ### Unions of traits via `Union`
 
@@ -94,8 +111,8 @@ Traits of *different trait classes* can be combined using a `Tuple{...}`. This
 represents a *smaller* set of Julia objects - those which satisfy all of the
 traits simultaneously. For example,
 ```julia
-abstract Odor
-immutable Smelly <: Odor; end
+abstract type Odor end
+struct Smelly <: Odor end
 
 @traitor describeyourself(::::Tuple{Big,Smelly}) = "I'm big and smelly"
 ```
@@ -114,9 +131,9 @@ this slippery code below:
 module Treason
 using Traitor
 
-abstract Mutability
-immutable Immutable <: Mutability; end
-immutable Mutable <: Mutability; end
+abstract type Mutability end
+struct Immutable <: Mutability end
+struct Mutable <: Mutability end
 
 @pure Mutability(T) = T.mutable ? Mutable : Immutable
 
@@ -135,10 +152,10 @@ end
     for i = 1:length(x) # Mutate it on the heap
         out[i] = f(x[i]) # Elsewhere define setindex!(::RefValue{Tuple}), etc
     end
-    return out.x # Copy it back to the stack
+    return out[] # Copy it back to the stack
 end
 
-function setindex!{T <: Tuple}(x::RefValue{T}, val, i::Integer)
+function setindex!(x::RefValue{T}, val, i::Integer) where {T <: Tuple}
     # grab a pointer and set some memory (safely, please...)
 end
 
