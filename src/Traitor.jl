@@ -59,11 +59,6 @@ using Core: SimpleVector, svec, CodeInfo
 
 export @traitor, supertrait, betray!
 
-
-struct FallbackTrait end
-FallbackTrait(::Type) = FallbackTrait
-supertrait(::Type{FallbackTrait}) = FallbackTrait
-
 """
     betray!(f, ::Type{TT}) where {TT <: Tuple}
 
@@ -93,7 +88,7 @@ function betray!(f, ::Type{TT}) where {TT<:Tuple}
     argnames = [gensym(Symbol(:arg, i)) for i ∈ 1:N]
     argstyped = map(1:N) do i
         T = unwrap_unionall(TT).parameters[i]
-        :($(argnames[i]) :: $T :: $FallbackTrait)
+        :($(argnames[i]) :: $T :: $Tuple{})
     end
     fsym = Symbol(f)
 
@@ -389,13 +384,13 @@ function is_more_specific_traitarg(traits, traits2)
     more_specific = true
     for traitclass in union(keys(d), keys(d2))
         if haskey(d, traitclass)
-            if haskey(d2, traitclass) && traitclass != FallbackTrait
+            if haskey(d2, traitclass)
                 if !(d[traitclass] <: d2[traitclass])
                     more_specific = false
                     break
                 end
             end
-        elseif haskey(d2, traitclass) && traitclass != FallbackTrait
+        elseif haskey(d2, traitclass)
             # only in old trait
             more_specific = false
             break
