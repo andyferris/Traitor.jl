@@ -174,6 +174,7 @@ as a default fallback.
 module SomeoneElsesCode
 f(x) = x + 1
 end
+
 import .SomeoneElsesCode: f
 
 betray!(f, Tuple{Any}) # Inputs are provided similarly to the `methods` of `code_lowered` functions
