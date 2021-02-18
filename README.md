@@ -162,14 +162,31 @@ end
 end # module
 ```
 
-### Help wanted: the `@betray` macro
+### `betray!`ing functions
 
-We would like to have a macro, say `@betray`, that would be able to "steal"
+Et tu?
+
+The `betray!` function allows one to effectively "steal"
 pre-existing method definitions and make them compatible with `@traitor` methods
-as a default fallback. The current roadblock is that we don't know how to
-take the code corresponding to a `Method` (or `LambdaInfo`) and insert it into
-a new method definition (since the `LambdaInfo` is lowered IR and it is normal
-to define methods with top-level expression syntax).
+as a default fallback. 
+
+```julia
+module SomeoneElsesCode
+f(x) = x + 1
+end
+
+betray!(f, Tuple{Any}) # Inputs are provided similarly to the `methods` of `code_lowered` functions
+
+@traitor f(x::::Big) = x - 1
+```
+
+```julia
+julia> f(1)
+2
+
+julia> f(BigInt(1))
+0
+```
 
 ## Acknowledgements
 
