@@ -19,6 +19,17 @@ Currently the package has basic functionality, supporting the features
 discussed in the following sections. Some obvious oversights include lack of
 support for default values and keyword arguments.
 
+One major difference between Traitor.jl and other trait packages that utilize the 
+so called "Holy trait pattern", is that Traitor.jl has it's own internal trait 
+based dispatch mechanism separate from the usual Julia multiple dispatch machinery.
+
+This difference increases the complexity of Traitor, but comes with some advantages
+such as allowing multiple people who are not coordinating together to add traits to
+a type and not collide with eachother. Put another way, similarly to how different 
+people can create their own subtypes of an abstract type and share functions, 
+Traitor allows multiple people to add traits and share trait functions.
+
+
 **Warning: please have some fun using this package, but it might not yet be suitable for production code.**
 
 ### Our expectations of a traits type system
