@@ -405,6 +405,4 @@ function is_more_specific_traitarg(traits, traits2)
     return more_specific
 end
 
-include("betray.jl")
-
 end # module
