@@ -62,3 +62,7 @@ betray!(f, Tuple{Any})
 
 @test f(1) == 2
 @test f(BigInt(1)) == 0
+
+
+Size(::Type{Bool}) = Small
+@test howbig(true) == "Teensy..."

@@ -59,6 +59,8 @@ using Core: SimpleVector, svec, CodeInfo
 
 export @traitor, supertrait, betray!
 
+using Cassette
+
 """
     betray!(f, ::Type{TT}) where {TT <: Tuple}
 
@@ -258,34 +260,112 @@ macro traitor(ex)
     internalname = internalname * "}"
     internalname = Symbol(internalname)
 
-    # It's hard to get all of this right with nest quote blocks, AND it's hard
-    # to get this right with Expr() objects... grrr...
-
-    # esc(Expr(:block,
-    #     Expr(:stagedfunction, Expr(:call, funcname, args...), Expr(:block,
-    #         :( dict = Traitor.get_trait_table($funcname, $(Expr(:curly, :Tuple, argtypes...))) ),
-    #         :( f = Traitor.trait_dispatch(dict, $(Expr(:curly, :Tuple, argnames...))) ),
-    #         Expr(:quote, Expr(:block,
-    #             Expr(:meta, :inline),
-    #             Expr(:call, Expr(:$, :f), argnames...)
-    #         ))
-    #     )),
-    #     Expr(:function, Expr(:call, internalname, args...), body),
-    #     :( d = Traitor.get_trait_table($funcname, $(Expr(:curly, :Tuple, argtypes...))) ),
-    #     :( d[$(Expr(:curly, :Tuple, traits...))] = $internalname ),
-    # ))
     dispatchname = gensym(Symbol(funcname, :_dispatched))
+
+    # Traitor.trait_dispatch,Tuple{Base.Dict{Any, Function}, Type{Tuple{Int64}}}
+    # Traitor.supertrait, Tuple{Type{Main.Small}}
+
     ex = quote
         $Traitor.@generated function $funcname($(args...)) 
             dict = Traitor.get_trait_table($funcname, $(Expr(:curly, :Tuple, argtypes...)))
-            $dispatchname = Traitor.trait_dispatch(dict, $(Expr(:curly, :Tuple, argnames...)))
-            (Expr(:call, $dispatchname, $(QuoteNode.(argnames)...)))
+            thunk = () -> Traitor.trait_dispatch(dict, $(Expr(:curly, :Tuple, argnames...)))
+            $dispatchname, trace = $generate_and_trace(thunk, ())
+            #$dispatchname = thunk()
+            ex = (Expr(:call, $dispatchname, $(QuoteNode.(argnames)...)))
+
+            # Create a codeinfo
+            ci = $expr_to_codeinfo($(__module__), [Symbol("#self#"), $(quotednames...)], [], (), ex)
+
+            #Make it so that anything that'd cause the trait_dispatch function to recompile, also
+            #causes this function to recompile
+            ci.edges = $Core.MethodInstance[]
+            for TT in [$(traits...)]
+                for T in TT.parameters
+                    for mi in $Core.Compiler.method_instances($supertrait, Tuple{Type{T}})
+                        push!(ci.edges, mi)
+                    end
+                end
+            end
+
+            # failures = Any[]
+            # Core.println(trace.calls)
+            # for (callf, callargs) in trace.calls
+            #     # if $parentmodule(callf) != $Traitor
+            #     #     continue
+            #     # end
+            #     # Core.println(callf, callargs)
+            #     # Skip DataType constructor which found its way in here somehow
+            #     if callf == DataType continue end
+            #     try
+            #         mi = $Core.Compiler.method_instances(callf, callargs)[1]
+            #         Core.println(mi)
+            #         push!(ci.edges, $Core.Compiler.method_instances(callf, callargs)[1])
+            #     catch
+            #         push!(failures, callargs)
+            #         continue
+            #     end
+            # end
+            # if !isempty(failures)
+            #     Core.println("WARNING: Some edges could not be found:")
+            #     Core.println(failures)
+            # end
+            
+            return ci
         end
         $internalname($(args...)) = $body
         local d = $Traitor.get_trait_table($funcname, $(Expr(:curly, :Tuple, argtypes...))) 
         d[Tuple{$(traits...)}] = $internalname
+        $funcname
     end
     esc(ex)
+end
+
+
+Cassette.@context TraceCtx
+
+mutable struct Trace
+    calls::Vector{Any}
+    Trace() = new(Any[])
+end
+
+function Cassette.prehook(ctx::TraceCtx, f, args...)
+    # if parentmodule(f) == Traitor
+    #     push!(ctx.metadata.calls, (f, Tuple{(type_arg(a) for a in args)...}))
+    # end
+    return nothing
+end
+# Skip Builtins, which can't be redefined so we don't need edges to them!
+Cassette.prehook(ctx::TraceCtx, f::Core.Builtin, args...) = nothing
+# Get typeof(arg) or Type{T} if arg is a Type. This keeps the method instances more precise.
+type_arg(a) = typeof(a)
+type_arg(::Type{T}) where {T} = Type{T}
+
+function generate_and_trace(generatorbody, args)
+    trace = Trace()
+    expr = Cassette.overdub(TraceCtx(metadata = trace), () -> generatorbody(args...))
+    expr, trace
+end
+
+
+function expr_to_codeinfo(m, argnames, spnames, sp, e)
+    lam = Expr(:lambda, argnames,
+               Expr(Symbol("scope-block"),
+                    Expr(:block,
+                         Expr(:return,
+                              Expr(:block,
+                                   e,
+                                   )))))
+    ex = if spnames === nothing || isempty(spnames)
+        lam
+    else
+        Expr(Symbol("with-static-parameters"), lam, spnames...)
+    end
+
+    # Get the code-info for the generatorbody in order to use it for generating a dummy
+    # code info object.
+    ci = ccall(:jl_expand_and_resolve, Any, (Any, Any, Core.SimpleVector), ex, m, Core.svec(sp...))
+    @assert ci isa Core.CodeInfo "Failed to compile @staged function. This might mean it contains a closure or comprehension?"
+    ci
 end
 
 
