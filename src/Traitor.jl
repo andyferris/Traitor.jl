@@ -63,7 +63,7 @@ export @traitor, supertrait, betray!
 using Cassette
 
 # A context for doing nothing
-Cassette.@context RoundTrip
+Cassette.@context DoNothingCtx
 
 
 """
@@ -123,6 +123,9 @@ is returns their common supertype (or else throws an error).
             error("Unions of traits must be in the same class. Got $T")
         end
         (Tb isa Union) || break
+    end
+    if traitclass == Any
+        error("$T does not have a supertrait.")
     end
     return traitclass
 end
@@ -190,6 +193,11 @@ if necessary, the first time it is called) the table joining the traits to
 the submethods
 """
 @generated function get_trait_table(f::Function, ::Type{Signature}) where {Signature <: Tuple}
+    # This is a questionable usage of a generated function. The idea is that it's an 'elegant' way
+    # to create an independant global dictionary for each method specification which can later be mutated.
+    # The problem is that if this generated function gets recompiled for some reason (which the compiler
+    # is allowed to do!) then the dictionary will be replaced with a new empty dict, deleting our trait
+    # table.
     d = Dict{Any, Function}()
     return quote
         $(Expr(:meta, :inline))
@@ -267,25 +275,24 @@ macro traitor(ex)
 
     dispatchname = gensym(Symbol(funcname, :_dispatched))
 
-    # Traitor.trait_dispatch,Tuple{Base.Dict{Any, Function}, Type{Tuple{Int64}}}
-    # Traitor.supertrait, Tuple{Type{Main.Small}}
-
     ex = quote
         $Traitor.@generated function $funcname($(args...)) 
             dict = Traitor.get_trait_table($funcname, $(Expr(:curly, :Tuple, argtypes...)))
             thunk = () -> Traitor.trait_dispatch(dict, $(Expr(:curly, :Tuple, argnames...)))
 
-            # This cassette overdub pass literally does nothing. I can't figure out why this
-            # doesn't work without it
-            $dispatchname = $Cassette.overdub($RoundTrip(), thunk)
+            # This cassette overdub pass literally does nothing other than normal evaluation.
+            # However, if I don't use it, the backedge attachment later on doesn't appear
+            # to have the desired effect.
+            $dispatchname = $Cassette.overdub($DoNothingCtx(), thunk)
             #$dispatchname = thunk()
             ex = (Expr(:call, $dispatchname, $(QuoteNode.(argnames)...)))
-
+ 
             # Create a codeinfo
             ci = $expr_to_codeinfo($(__module__), [Symbol("#self#"), $(quotednames...)], [], (), ex)
 
-            #Make it so that anything that'd cause the trait_dispatch function to recompile, also
-            #causes this function to recompile
+            # Attached edges from MethodInstrances of the `supertrait` function to to this CodeInfo.
+            # This should make it so that adding members to a trait relevant to this function
+            # triggers recompilation, fixing the #265 equivalent for trait methods.
             ci.edges = $Core.MethodInstance[]
             for TT in [$(traits...)]
                 for T in TT.parameters
@@ -305,8 +312,29 @@ macro traitor(ex)
     esc(ex)
 end
 
+"""
+    expr_to_codeinfo(m::Module, argnames, spnames, sp, e::Expr)
 
-function expr_to_codeinfo(m, argnames, spnames, sp, e)
+Take an expr (usually a generated function generator) and convert it into a CodeInfo object 
+(Julia's internal, linear representation of code). 
+
+`m` is the module that the CodeInfo should be generated from (used for name resolution)
+
+`argnames` must be an iterable container of symbols describing the CodeInfo's input arguments. 
+NOTE: the first argument should be given as `Symbol("#self#")`. So if the function is `f(x) = x + 1`,
+then `argnames = [Symbol("#self#"), :x]`
+
+`spnames` should be an iterable container of the names of the static parameters to the CodeInfo body
+(e.g.) in `f(x::T) where {T <: Int} = ...`, `T` is a static parameter, so `spnames` should be `[:T]` 
+
+`sp` should be an iterable container of the static parameters to the CodeInfo body themselves (as 
+opposed to their names) (e.g.) in `f(x::T) where {T <: Int} = ...`, `T` is a static parameter, 
+so `sp` should be `[T]` 
+
+`e` is the actual expression to lower to CodeInfo. This must be 'pure' in the same sense as generated
+function bodies.
+"""
+function expr_to_codeinfo(m::Module, argnames, spnames, sp, e::Expr)
     lam = Expr(:lambda, argnames,
                Expr(Symbol("scope-block"),
                     Expr(:block,
@@ -323,10 +351,9 @@ function expr_to_codeinfo(m, argnames, spnames, sp, e)
     # Get the code-info for the generatorbody in order to use it for generating a dummy
     # code info object.
     ci = ccall(:jl_expand_and_resolve, Any, (Any, Any, Core.SimpleVector), ex, m, Core.svec(sp...))
-    @assert ci isa Core.CodeInfo "Failed to compile @staged function. This might mean it contains a closure or comprehension?"
+    @assert ci isa Core.CodeInfo "Failed to create a CodeInfo from the given expression. This might mean it contains a closure or comprehension?\n Offending expression: $e"
     ci
 end
-
 
 
 """
