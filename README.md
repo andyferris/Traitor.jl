@@ -19,6 +19,17 @@ Currently the package has basic functionality, supporting the features
 discussed in the following sections. Some obvious oversights include lack of
 support for default values and keyword arguments.
 
+One major difference between Traitor.jl and other trait packages that utilize the 
+so called "Holy trait pattern", is that Traitor.jl has it's own internal trait 
+based dispatch mechanism separate from the usual Julia multiple dispatch machinery.
+
+This difference increases the complexity of Traitor, but comes with some advantages
+such as allowing multiple people who are not coordinating together to add traits to
+a type and not collide with eachother. Put another way, similarly to how different 
+people can create their own subtypes of an abstract type and share functions, 
+Traitor allows multiple people to add traits and share trait functions.
+
+
 **Warning: please have some fun using this package, but it might not yet be suitable for production code.**
 
 ### Our expectations of a traits type system
@@ -29,11 +40,11 @@ trait class, while subtypes of them define examples of that trait.
 For example:
 
 ```julia
-abstract Size
+abstract type Size end
 
-immutable Big <: Size; end
-immutable Medium <: Size; end
-immutable Small <: Size; end
+struct Big    <: Size end
+struct Medium <: Size end
+struct Small  <: Size end
 ```
 
 Types are annotated with traits *post-hoc* by returning the appropriate trait
@@ -43,8 +54,8 @@ question. So we could have:
 ```julia
 # Note: both input and output are types
 Size(::Union{Type{Int32},Type{Int64}}) = Small
-Size(::Type{BigInt}) = Big
-Size(::Type{Int128}) = Medium
+Size(::Type{BigInt})                   = Big
+Size(::Type{Int128})                   = Medium
 ```
 
 ### The `@traitor` macro
@@ -69,13 +80,30 @@ end
     "So-so"
 end
 
-# One can combine standard dispatch and traits-based dispatch. In this case,
-# standard multiple-dispatch occurs first, and `Traitor` then selects the most
-# appropriate trait-based submethod.
+# One can combine standard dispatch and traits-based dispatch. 
 @traitor function howbig(x::Integer::Small)
     "Teensy..."
 end
 ```
+Since standard dispatch happens before trait dispatch, the above method `howbig(x::Integer::Small)` has higher precendence than `howbig(x::::Medium)` and `howbig(x::Any::Big)`, so we need to define more specific versions of those methods:
+```julia
+@traitor howbig(x::Integer::Big) = "Huge!"
+@traitor howbig(x::Integer::Medium) = "So-so"
+```
+Now,
+```julia
+julia> howbig(1)
+"Teensy..."
+
+julia> howbig(Int128(1))
+"So-so"
+
+julia> howbig(BigInt(1))
+"Huge!"
+
+```
+
+
 
 ### Unions of traits via `Union`
 
@@ -94,8 +122,8 @@ Traits of *different trait classes* can be combined using a `Tuple{...}`. This
 represents a *smaller* set of Julia objects - those which satisfy all of the
 traits simultaneously. For example,
 ```julia
-abstract Odor
-immutable Smelly <: Odor; end
+abstract type Odor end
+struct Smelly <: Odor end
 
 @traitor describeyourself(::::Tuple{Big,Smelly}) = "I'm big and smelly"
 ```
@@ -114,9 +142,9 @@ this slippery code below:
 module Treason
 using Traitor
 
-abstract Mutability
-immutable Immutable <: Mutability; end
-immutable Mutable <: Mutability; end
+abstract type Mutability end
+struct Immutable <: Mutability end
+struct Mutable <: Mutability end
 
 @pure Mutability(T) = T.mutable ? Mutable : Immutable
 
@@ -135,24 +163,43 @@ end
     for i = 1:length(x) # Mutate it on the heap
         out[i] = f(x[i]) # Elsewhere define setindex!(::RefValue{Tuple}), etc
     end
-    return out.x # Copy it back to the stack
+    return out[] # Copy it back to the stack
 end
 
-function setindex!{T <: Tuple}(x::RefValue{T}, val, i::Integer)
+function setindex!(x::RefValue{T}, val, i::Integer) where {T <: Tuple}
     # grab a pointer and set some memory (safely, please...)
 end
 
 end # module
 ```
 
-### Help wanted: the `@betray` macro
+### `betray!`ing functions
 
-We would like to have a macro, say `@betray`, that would be able to "steal"
+Et tu?
+
+The `betray!` function allows one to effectively "steal"
 pre-existing method definitions and make them compatible with `@traitor` methods
-as a default fallback. The current roadblock is that we don't know how to
-take the code corresponding to a `Method` (or `LambdaInfo`) and insert it into
-a new method definition (since the `LambdaInfo` is lowered IR and it is normal
-to define methods with top-level expression syntax).
+as a default fallback. 
+
+```julia
+module SomeoneElsesCode
+f(x) = x + 1
+end
+
+import .SomeoneElsesCode: f
+
+betray!(f, Tuple{Any}) # Inputs are provided similarly to the `methods` of `code_lowered` functions
+
+@traitor f(x::::Big) = x - 1
+```
+
+```julia
+julia> f(1)
+2
+
+julia> f(BigInt(1))
+0
+```
 
 ## Acknowledgements
 
