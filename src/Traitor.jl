@@ -269,7 +269,10 @@ macro traitor(ex)
         $Traitor.@generated function $funcname($(args...)) 
             dict = Traitor.get_trait_table($funcname, $(Expr(:curly, :Tuple, argtypes...)))
             thunk = () -> Traitor.trait_dispatch(dict, $(Expr(:curly, :Tuple, argnames...)))
-            $dispatchname, trace = $generate_and_trace(thunk, ())
+
+            # This cassette overdub pass literally does nothing. I can't figure out why this
+            # doesn't work without it
+            $dispatchname = $Cassette.overdub($RoundTrip(), thunk)
             #$dispatchname = thunk()
             ex = (Expr(:call, $dispatchname, $(QuoteNode.(argnames)...)))
 
@@ -286,29 +289,6 @@ macro traitor(ex)
                     end
                 end
             end
-
-            # failures = Any[]
-            # Core.println(trace.calls)
-            # for (callf, callargs) in trace.calls
-            #     # if $parentmodule(callf) != $Traitor
-            #     #     continue
-            #     # end
-            #     # Core.println(callf, callargs)
-            #     # Skip DataType constructor which found its way in here somehow
-            #     if callf == DataType continue end
-            #     try
-            #         mi = $Core.Compiler.method_instances(callf, callargs)[1]
-            #         Core.println(mi)
-            #         push!(ci.edges, $Core.Compiler.method_instances(callf, callargs)[1])
-            #     catch
-            #         push!(failures, callargs)
-            #         continue
-            #     end
-            # end
-            # if !isempty(failures)
-            #     Core.println("WARNING: Some edges could not be found:")
-            #     Core.println(failures)
-            # end
             
             return ci
         end
@@ -321,30 +301,7 @@ macro traitor(ex)
 end
 
 
-Cassette.@context TraceCtx
-
-mutable struct Trace
-    calls::Vector{Any}
-    Trace() = new(Any[])
-end
-
-function Cassette.prehook(ctx::TraceCtx, f, args...)
-    # if parentmodule(f) == Traitor
-    #     push!(ctx.metadata.calls, (f, Tuple{(type_arg(a) for a in args)...}))
-    # end
-    return nothing
-end
-# Skip Builtins, which can't be redefined so we don't need edges to them!
-Cassette.prehook(ctx::TraceCtx, f::Core.Builtin, args...) = nothing
-# Get typeof(arg) or Type{T} if arg is a Type. This keeps the method instances more precise.
-type_arg(a) = typeof(a)
-type_arg(::Type{T}) where {T} = Type{T}
-
-function generate_and_trace(generatorbody, args)
-    trace = Trace()
-    expr = Cassette.overdub(TraceCtx(metadata = trace), () -> generatorbody(args...))
-    expr, trace
-end
+Cassette.@context RoundTrip
 
 
 function expr_to_codeinfo(m, argnames, spnames, sp, e)
