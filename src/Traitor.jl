@@ -59,7 +59,12 @@ using Core: SimpleVector, svec, CodeInfo
 
 export @traitor, supertrait, betray!
 
+
 using Cassette
+
+# A context for doing nothing
+Cassette.@context RoundTrip
+
 
 """
     betray!(f, ::Type{TT}) where {TT <: Tuple}
@@ -299,9 +304,6 @@ macro traitor(ex)
     end
     esc(ex)
 end
-
-
-Cassette.@context RoundTrip
 
 
 function expr_to_codeinfo(m, argnames, spnames, sp, e)
